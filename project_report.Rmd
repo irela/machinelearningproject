@@ -1,0 +1,107 @@
+---
+title: "Practical Machine Learning Project"
+date: "21.03.2015"
+output: html_document
+---
+
+
+###Introduction
+
+This document describes project work on Coursera's Practical Machine Learning course. The task was to use the given data to build a model to predict the manner in which a barbell lift was done. The data consists of sensor data gathered with a few sensors weared during the exercise.  The data source was http://groupware.les.inf.puc-rio.br/har. 
+
+
+###Loading libraries
+
+First let's load some libraries we'll need.
+```{r}
+library(ggplot2)
+library(caret)
+library(rpart) 
+library(randomForest)
+library(doParallel)
+```
+
+
+###Getting and Cleaning the Data
+
+Training data was available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv A test data set was also provided for evaluation of the model (https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv).
+
+
+First I loaded the training data with empty strings and DIV/0 interpreted as NA's.
+```{r}
+fit <- read.csv("pml-training.csv", na.strings = c("NA", "#DIV/0!", ""), header = TRUE)
+```
+
+The data contained many columns that only had few rows of data (or only error cells). Columns with 90% or more NAs were removed. The first columns in the data contained timestamps, id and other data that was not needed for prediction. These columns (1-7) were also removed leaving 53 columns 
+```{r}
+fit <- fit[,colSums(is.na(fit))< nrow(fit)*0.9]
+fit <- fit[, -1:-7]
+dim(fit)
+```
+
+The test data for evaluation was loaded and cleaned the same way.
+
+```{r}
+fittest <- read.csv("pml-testing.csv", na.strings = c("NA", "#DIV/0!", ""), header = TRUE)
+fittest <- fittest[,colSums(is.na(fittest))< nrow(fittest)*0.9]
+fittest <- fittest[, -1:-7]
+
+dim(fittest)
+```
+
+Now there are 52 features for prediction (53rd column is classe indicating the manner the barbell lift was done). 
+
+
+###Partitioning the Data
+
+Before building the model the training data is divided into training (60%) and testing (40%) portions. 
+
+```{r}
+inTrain <- createDataPartition(y=fit$classe,
+                               p=0.6, list=FALSE)
+training <- fit[inTrain,]
+testing <- fit[-inTrain,]
+dim(training); dim(testing)
+```
+
+###Building the model
+
+I used random forest algorithm to build the model. My first attempt with the algorithm took over six hours and ended in warnings of insufficient space on my virtual machine. To solve this problem the computation was parallelized using the doParallel library. This reduced the running time of the algorithm significantly.  
+
+```{r}
+set.seed(6543); 
+registerDoParallel()
+x <- training[-ncol(training)]
+y <- training$classe
+
+randomForestModel <- foreach(ntree=rep(100, 8), .combine=randomForest::combine, .packages='randomForest') %dopar% {
+
+  randomForest(x, y, ntree=ntree) 
+}
+```
+
+###Evaluating the model
+
+
+Applying the model on the data it was trained resulted in excellent accuracy:
+```{r}
+samplePred <- predict(randomForestModel, newdata=training)
+confusionMatrix(samplePred,training$classe)
+```
+
+
+We can use the testing data to get the model's out of sample error. The testing data set was taken from the initial training data before building the model so it gives a better figure of the models accuracy.
+```{r}
+predictions <- predict(randomForestModel, newdata=testing)
+confusionMatrix(predictions,testing$classe)
+```
+
+It can be seen from the confusion matrix that the model performs pretty well. 
+
+Finally we can use the pml-testing data to predict the class in 20 instances.
+```{r}
+prediction20 <- predict(randomForestModel, newdata=fittest)
+prediction20
+```
+
+
